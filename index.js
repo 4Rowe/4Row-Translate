@@ -23,16 +23,13 @@ app.post('/webhook', line.middleware(config), async (req, res) => {
   try {
     const events = req.body.events;
     
-    // ตรวจสอบว่าเป็น Events ที่ต้องการ
     if (!Array.isArray(events)) {
       return res.status(400).json({ error: 'Invalid events format' });
     }
 
-    // ประมวลผลทุก Event
     const results = await Promise.all(
       events.map(async (event) => {
         try {
-          // ตรวจสอบว่าเป็น Message Event และเป็น Text Message
           if (event.type === 'message' && event.message.type === 'text') {
             return await handleMessageEvent(event);
           }
@@ -55,7 +52,6 @@ app.post('/webhook', line.middleware(config), async (req, res) => {
 async function handleMessageEvent(event) {
   const userMessage = event.message.text;
   
-  // ตรวจสอบว่าข้อความไม่ว่างเปล่า
   if (!userMessage || userMessage.trim() === '') {
     return client.replyMessage(event.replyToken, {
       type: 'text',
@@ -64,19 +60,37 @@ async function handleMessageEvent(event) {
   }
 
   try {
-    // ตรวจสอบภาษา (ภาษาอังกฤษหรือไทย)
-    const isEnglish = /^[a-zA-Z0-9\s.,!?;:'"()\-]+$/.test(userMessage);
-    const sourceLang = isEnglish ? 'en' : 'th';
-    const targetLang = isEnglish ? 'th' : 'en';
+    // ตรวจสอบภาษา (ไทยหรือพม่า)
+    const isThai = /[\u0E00-\u0E7F]/.test(userMessage); // ตรวจสอบอักษรไทย
+    const isBurmese = /[\u1000-\u109F]/.test(userMessage); // ตรวจสอบอักษรพม่า
+    
+    let sourceLang, targetLang;
+    
+    if (isThai) {
+      sourceLang = 'th';
+      targetLang = 'my'; // พม่า
+    } else if (isBurmese) {
+      sourceLang = 'my';
+      targetLang = 'th'; // ไทย
+    } else {
+      // ถ้าไม่ใช่ทั้งไทยและพม่า ให้ถือว่าเป็นภาษาอังกฤษ
+      sourceLang = 'en';
+      targetLang = 'th'; // แปลเป็นไทย
+    }
 
     // เรียกใช้ MyMemory Translation API
     const response = await axios.get(
       `https://api.mymemory.translated.net/get?q=${encodeURIComponent(userMessage)}&langpair=${sourceLang}|${targetLang}`
     );
 
-    // ตรวจสอบว่ามีผลลัพธ์การแปล
-    const translatedText = response.data?.responseData?.translatedText || 
-                         'ไม่สามารถแปลข้อความนี้ได้ในขณะนี้';
+    let translatedText = response.data?.responseData?.translatedText || 
+                       'ไม่สามารถแปลข้อความนี้ได้ในขณะนี้';
+
+    // กรณีที่แปลพม่าเป็นไทย แต่ API คืนค่ามาเป็นภาษาอังกฤษ
+    if (sourceLang === 'my' && targetLang === 'th' && 
+        /[a-zA-Z]/.test(translatedText) && !/[\u0E00-\u0E7F]/.test(translatedText)) {
+      translatedText = 'ขออภัย ระบบสามารถแปลพม่าเป็นอังกฤษได้ แต่แปลเป็นไทยโดยตรงไม่ได้ในขณะนี้';
+    }
 
     // ตอบกลับผู้ใช้
     return client.replyMessage(event.replyToken, {
@@ -100,7 +114,12 @@ app.get('/', (req, res) => {
   res.json({
     status: 'running',
     timestamp: new Date().toISOString(),
-    service: 'LINE Translation Bot'
+    service: 'LINE Translation Bot (ไทย-พม่า)',
+    supported_languages: {
+      th: 'ไทย',
+      my: 'พม่า',
+      en: 'อังกฤษ'
+    }
   });
 });
 
@@ -113,5 +132,5 @@ app.use((err, req, res, next) => {
 // เริ่มต้นเซิร์ฟเวอร์
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`);
+  console.log(`Translation Bot (ไทย-พม่า) กำลังทำงานที่พอร์ต ${PORT}`);
 });
